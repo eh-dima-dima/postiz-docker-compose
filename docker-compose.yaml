@@ -1,14 +1,13 @@
 services:
   postiz:
     image: ghcr.io/gitroomhq/postiz-app:latest
-    container_name: postiz
     restart: always
     environment:
       # === Required Settings
-      MAIN_URL: 'http://localhost:4007'
-      FRONTEND_URL: 'http://localhost:4007'
-      NEXT_PUBLIC_BACKEND_URL: 'http://localhost:4007/api'
-      JWT_SECRET: 'random string that is unique to every install - just type random characters here!'
+      MAIN_URL: '${PUBLIC_URL}'
+      FRONTEND_URL: '${PUBLIC_URL}'
+      NEXT_PUBLIC_BACKEND_URL: '${PUBLIC_URL}/api'
+      JWT_SECRET: '${JWT_SECRET}'
       DATABASE_URL: 'postgresql://postiz-user:postiz-password@postiz-postgres:5432/postiz-db-local'
       REDIS_URL: 'redis://postiz-redis:6379'
       BACKEND_INTERNAL_URL: 'http://localhost:3000'
@@ -112,11 +111,20 @@ services:
     volumes:
       - postiz-config:/config/
       - postiz-uploads:/uploads/
-    ports:
-      - "4007:5000"
+    expose:
+      - "5000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK:-coolify}"
+      - "traefik.http.routers.postiz.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.postiz.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.postiz.tls=true"
+      - "traefik.http.routers.postiz.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      - "traefik.http.services.postiz.loadbalancer.server.port=5000"
     networks:
       - postiz-network
       - temporal-network
+      - coolify
     healthcheck:
       test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:5000/',res=>process.exit(res.statusCode<500?0:1));r.on('error',()=>process.exit(1));r.setTimeout(4000,()=>{r.destroy();process.exit(1)})"]
       interval: 30s
@@ -133,10 +141,9 @@ services:
 
   postiz-postgres:
     image: postgres:17-alpine
-    container_name: postiz-postgres
     restart: always
     environment:
-      POSTGRES_PASSWORD: postiz-password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_USER: postiz-user
       POSTGRES_DB: postiz-db-local
     volumes:
@@ -151,7 +158,6 @@ services:
       start_period: 10s
   postiz-redis:
     image: redis:7.2
-    container_name: postiz-redis
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
@@ -168,10 +174,9 @@ services:
   spotlight:
     profiles: [debug]
     pull_policy: always
-    container_name: spotlight
     restart: unless-stopped
-    ports:
-      - 127.0.0.1:8969:8969/tcp
+    expose:
+      - "8969"
     image: ghcr.io/getsentry/spotlight:latest
     networks:
       - postiz-network
@@ -180,7 +185,6 @@ services:
   # Temporal Stack
   # -----------------------
   temporal-elasticsearch:
-    container_name: temporal-elasticsearch
     image: elasticsearch:7.17.27
     restart: always
     environment:
@@ -205,11 +209,10 @@ services:
       - temporal-elasticsearch-data:/usr/share/elasticsearch/data
 
   temporal-postgresql:
-    container_name: temporal-postgresql
     image: postgres:16
     restart: always
     environment:
-      POSTGRES_PASSWORD: temporal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_USER: temporal
     networks:
       - temporal-network
@@ -225,10 +228,9 @@ services:
       - temporal-postgres-data:/var/lib/postgresql/data
 
   temporal:
-    container_name: temporal
     restart: always
-    ports:
-      - '127.0.0.1:7233:7233'
+    expose:
+      - "7233"
     image: temporalio/auto-setup:1.28.1
     depends_on:
       temporal-postgresql:
@@ -239,7 +241,7 @@ services:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
+      - POSTGRES_PWD=${TEMPORAL_POSTGRES_PASSWORD}
       - POSTGRES_SEEDS=temporal-postgresql
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
       - ENABLE_ES=true
@@ -260,7 +262,6 @@ services:
       kompose.volume.type: configMap
 
   temporal-admin-tools:
-    container_name: temporal-admin-tools
     image: temporalio/admin-tools:1.28.1-tctl-1.18.4-cli-1.4.1
     restart: on-failure
     environment:
@@ -275,16 +276,15 @@ services:
     tty: true
 
   temporal-ui:
-    container_name: temporal-ui
     image: temporalio/ui:2.34.0
     restart: always
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://127.0.0.1:3000
+      - TEMPORAL_CORS_ORIGINS=${PUBLIC_URL}
     networks:
       - temporal-network
-    ports:
-      - '127.0.0.1:8080:8080'
+    expose:
+      - "8080"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
       interval: 30s
@@ -320,3 +320,7 @@ networks:
   temporal-network:
     driver: bridge
     name: temporal-network
+  # The managed Traefik network - provided by the platform, never created here.
+  coolify:
+    external: true
+    name: ${TRAEFIK_NETWORK:-coolify}
