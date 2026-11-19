@@ -116,10 +116,9 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=${TRAEFIK_NETWORK:-coolify}"
-      - "traefik.http.routers.postiz.rule=Host(`${PUBLIC_HOST}`)"
-      - "traefik.http.routers.postiz.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
-      - "traefik.http.routers.postiz.tls=true"
-      - "traefik.http.routers.postiz.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
+      # No Host() rule here: the platform generates the router from
+      # docker_compose_domains. Only the service port is declared, because
+      # without it Traefik cannot build a loadbalancer for this service.
       - "traefik.http.services.postiz.loadbalancer.server.port=5000"
     networks:
       - postiz-network
@@ -256,8 +255,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    volumes:
-      - ./dynamicconfig:/etc/temporal/config/dynamicconfig
+    configs:
+      - source: temporal_dynamic_config
+        target: /etc/temporal/config/dynamicconfig/development-sql.yaml
     labels:
       kompose.volume.type: configMap
 
@@ -294,6 +294,17 @@ services:
     depends_on:
       temporal:
         condition: service_healthy
+
+configs:
+  # Inline so the file never depends on a host path being populated.
+  temporal_dynamic_config:
+    content: |
+      limit.maxIDLength:
+        - value: 255
+          constraints: {}
+      system.forceSearchAttributesCacheRefreshOnRead:
+        - value: true
+          constraints: {}
 
 volumes:
   postgres-volume:
